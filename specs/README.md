@@ -79,11 +79,12 @@ The application centers on seven foundational habits, each building upon the pre
 
 ### 5.1 User Authentication and Profile Management
 
-1. Users shall be able to create an account using email/password or social authentication (Google).
-2. Users shall be able to create and edit a profile including name, profile photo, and time zone.
+1. Users shall be able to create an account using email/password or social authentication (Google) via Supabase Auth.
+2. Users shall be able to create and edit a profile including name, profile photo (stored in Supabase Storage), and time zone.
 3. Users shall be able to set notification preferences for reminders and community updates.
 4. Users shall be able to export or delete their personal data in compliance with privacy regulations.
-5. The system shall support password reset via email verification.
+5. The system shall support password reset via Supabase Auth's email verification flow.
+6. Protected routes shall be enforced via Next.js middleware validating Supabase session tokens.
 
 ### 5.2 Habit Setup Workflow ("Create Your System")
 
@@ -209,10 +210,11 @@ Users shall complete structured input fields for each of the four behavioral law
 
 ### 6.2 Security
 
-1. All data transmission shall use HTTPS encryption.
-2. User passwords shall be hashed using industry-standard algorithms.
-3. The system shall implement rate limiting to prevent abuse.
-4. Personal reflection and prayer content shall be encrypted at rest.
+1. All data transmission shall use HTTPS encryption (enforced by Vercel and Supabase).
+2. User authentication shall be handled by Supabase Auth with secure password hashing (bcrypt) and JWT session tokens.
+3. Row Level Security (RLS) policies shall enforce data access rules at the database level, ensuring users can only access their own data.
+4. The system shall implement rate limiting via Supabase and Vercel edge configuration to prevent abuse.
+5. Personal reflection and prayer content shall be protected by RLS policies and encrypted at rest by Supabase's managed Postgres instance.
 
 ### 6.3 Accessibility
 
@@ -235,52 +237,136 @@ Users shall complete structured input fields for each of the four behavioral law
 
 ---
 
-## 7. Technical Recommendations
+## 7. Technical Architecture
 
-The following technical stack is recommended based on the requirements:
+The following technical stack has been selected for implementation:
 
 ### 7.1 Frontend
 
-1. React or Next.js for component-based UI development
-2. Tailwind CSS for responsive, consistent styling
-3. Progressive Web App (PWA) capabilities for offline tracking and mobile installation
+**Framework:** Next.js (App Router) with React and TypeScript. The App Router provides server components for improved performance and SEO, streaming and suspense for better loading states, built-in layouts and nested routing, and server actions for form handling and mutations.
+
+**UI Layer:** Tailwind CSS for utility-first styling with a component library (such as shadcn/ui, Radix UI, or Headless UI) for accessible, pre-built interactive components. This combination enables rapid development while maintaining visual consistency with HFL Academy branding.
+
+**Client-Side Data Management:** TanStack Query (optional) for client-side caching, optimistic updates, and mutation handling where real-time responsiveness is needed beyond what server components provide.
 
 ### 7.2 Backend
 
-1. Node.js with Express or Python with FastAPI
-2. PostgreSQL for relational data storage
-3. Redis for session management and caching
+**Platform:** Supabase provides a complete backend-as-a-service solution with the following components:
 
-### 7.3 Infrastructure
+**Database:** PostgreSQL hosted by Supabase, providing relational data storage for users, habits, tracking entries, Bible reading progress, and community posts. Supabase's Postgres instance supports full SQL capabilities, including views, functions, and triggers for complex business logic.
 
-1. Cloud hosting (AWS, Google Cloud, or Vercel)
-2. CDN for static asset delivery
-3. Automated CI/CD pipeline for deployments
+**Authentication:** Supabase Auth handles user registration, login, password reset, and social authentication (Google). Row Level Security (RLS) policies enforce data access rules directly at the database level, ensuring users can only access their own data.
+
+**Storage:** Supabase Storage for user profile photos and generated tracker images for community sharing.
+
+**Edge Functions:** Supabase Edge Functions (Deno-based) for serverless compute needs such as scheduled notifications, weekly summary generation, and any webhook integrations.
+
+**Realtime:** Supabase Realtime for live updates to the community feed, enabling users to see new posts and reactions without refreshing.
+
+### 7.3 Data Access Patterns
+
+**Server-Side:** Direct supabase-js client usage within Next.js server components and route handlers. This approach keeps database credentials secure, reduces client bundle size, and leverages server-side rendering for initial page loads.
+
+**Client-Side:** For interactive features requiring immediate feedback (habit check-ins, reactions), the supabase-js client can be used directly or wrapped with TanStack Query for caching, background refetching, and optimistic updates.
+
+**Authentication Flow:** Supabase Auth integrates with Next.js middleware to protect routes and layouts. The middleware validates session tokens and redirects unauthenticated users to the login page. RLS policies provide a second layer of protection at the database level.
+
+### 7.4 Hosting and Infrastructure
+
+**Platform:** Vercel provides hosting optimized for Next.js applications with the following benefits:
+
+- **Preview Deployments:** Every pull request automatically deploys to a unique preview URL for testing and review.
+- **Production Deployments:** Merges to the main branch trigger automatic production deployments with zero-downtime.
+- **Custom Domains:** Support for custom domain configuration with automatic SSL certificates.
+- **Built-in CDN:** Global edge network for static asset delivery and edge caching.
+- **Environment Variables:** Secure management of Supabase credentials and other secrets per environment.
+
+**CI/CD:** Vercel's Git integration provides automated builds, deployments, and rollbacks without additional pipeline configuration.
+
+### 7.5 Architecture Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Client Browser                          │
+└─────────────────────────────────────────────────────────────────┘
+                                │
+                                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Vercel Edge Network                        │
+│  ┌───────────────────────────────────────────────────────────┐  │
+│  │                    Next.js Application                     │  │
+│  │  ┌─────────────────┐  ┌─────────────────────────────────┐ │  │
+│  │  │ Server          │  │ Client Components               │ │  │
+│  │  │ Components      │  │ (TanStack Query + supabase-js)  │ │  │
+│  │  │ (supabase-js)   │  │                                 │ │  │
+│  │  └────────┬────────┘  └────────────────┬────────────────┘ │  │
+│  │           │                            │                  │  │
+│  │  ┌────────┴────────────────────────────┴────────────────┐ │  │
+│  │  │              Next.js Middleware (Auth)               │ │  │
+│  │  └──────────────────────────┬───────────────────────────┘ │  │
+│  └─────────────────────────────┼─────────────────────────────┘  │
+└────────────────────────────────┼────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                          Supabase                               │
+│  ┌──────────────┐ ┌──────────────┐ ┌──────────────────────────┐ │
+│  │   Postgres   │ │     Auth     │ │        Storage           │ │
+│  │   Database   │ │   (+ RLS)    │ │   (Profile Images)       │ │
+│  └──────────────┘ └──────────────┘ └──────────────────────────┘ │
+│  ┌──────────────┐ ┌──────────────────────────────────────────┐  │
+│  │   Realtime   │ │          Edge Functions                  │  │
+│  │ (Community)  │ │   (Notifications, Scheduled Tasks)       │  │
+│  └──────────────┘ └──────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+```
 
 ---
 
 ## 8. Implementation Phases
 
-### Phase 1: Core Functionality (MVP)
+### Phase 1: Foundation and Core Functionality (MVP)
 
-1. User authentication and profile management
-2. Habit setup workflow ("Create Your System")
-3. Daily habit tracker with check-ins
-4. Basic dashboard
+**Infrastructure Setup:**
+- Initialize Next.js project with App Router and TypeScript
+- Configure Tailwind CSS and selected component library
+- Set up Supabase project (database, auth, storage)
+- Configure Vercel deployment with environment variables
+- Implement Supabase Auth with Next.js middleware for protected routes
+
+**Core Features:**
+1. User authentication (email/password and Google OAuth)
+2. User profile management
+3. Habit setup workflow ("Create Your System")
+4. Daily habit tracker with check-ins
+5. Basic dashboard with today's view
+
+**Database Schema (Initial):**
+- Users and profiles
+- Habits and habit configurations
+- Daily tracking entries
+- User "why" statements and prayers
 
 ### Phase 2: Extended Features
 
-1. Bible reading plan integration
-2. Community posting and feed
-3. Notification system
-4. Progress analytics
+1. Bible reading plan integration with daily assignments and progress tracking
+2. Community posting and feed with Supabase Realtime for live updates
+3. Notification system via Supabase Edge Functions (email triggers, scheduled reminders)
+4. Progress analytics with historical charts
+5. Reaction system for community posts
 
-### Phase 3: Enhancement
+**Database Schema (Extended):**
+- Bible reading plans and progress
+- Community posts and reactions
+- Notification preferences and logs
 
-1. Export and print functionality
-2. Advanced analytics and year-in-review
-3. PWA offline capabilities
-4. Accessibility audit and improvements
+### Phase 3: Enhancement and Polish
+
+1. Export and print functionality (PDF generation)
+2. Advanced analytics and year-in-review summaries
+3. Progressive Web App (PWA) capabilities for offline tracking and home screen installation
+4. Accessibility audit and WCAG 2.1 AA compliance improvements
+5. Performance optimization and edge caching strategies
 
 ---
 
